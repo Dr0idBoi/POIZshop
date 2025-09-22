@@ -1,0 +1,30 @@
+# .gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Venvs
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env & secrets
+.env
+secrets/*
+!secrets/.gitkeep
+
+# Runtime data
+data/*
+!data/.gitkeep
