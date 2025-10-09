@@ -4,40 +4,24 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="39117dea-35f4-4432-a7e5-8648eb1c0424" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/Kolyan_POIZON.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/__main__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/handlers/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/handlers/admin.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/handlers/client.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/keyboards.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/bot/middlewares.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/crm/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/crm/sheets.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/db.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/logger.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/exchange.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/exports.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/links.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/payments.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/pricing.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/services/tasks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+    <list default="true" id="39117dea-35f4-4432-a7e5-8648eb1c0424" name="Changes" comment="ini">
+      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/__main__.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/__main__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/bot/handlers/admin.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/bot/handlers/admin.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/bot/handlers/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/bot/handlers/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/bot/keyboards.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/bot/keyboards.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/bot/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/bot/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/bot/middlewares.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/bot/middlewares.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/crm/sheets.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/crm/sheets.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/db.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/db.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/logger.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/logger.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/services/exchange.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/exchange.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/services/links.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/links.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/services/payments.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/payments.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/services/pricing.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/pricing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/services/tasks.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/tasks.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -68,7 +52,8 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
   }
 }</component>
   <component name="RecentsManager">
@@ -117,6 +102,19 @@
       <option name="presentableId" value="Default" />
       <updated>1758565484450</updated>
     </task>
+    <task id="LOCAL-00001" summary="ini">
+      <option name="closed" value="true" />
+      <created>1758571041735</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1758571041735</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="ini" />
+    <option name="LAST_COMMIT_MESSAGE" value="ini" />
   </component>
 </project>
