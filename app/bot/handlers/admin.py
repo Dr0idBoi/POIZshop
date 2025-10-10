@@ -24,12 +24,55 @@ from app.bot.keyboards import (
     ikb_confirm_calculation,
     ikb_payment_test_button, ikb_payment_button
 )
+import csv
+from io import StringIO
 log = logging.getLogger("admin")
 router = Router(name="admin")
 router.message.middleware(AdminOnly())
 router.callback_query.middleware(AdminOnly())
 def CMD(name: str):
     return F.text.regexp(fr"^/{name}(?:@\w+)?(?:\s|$)")
+# === DATA EXPORT ===
+
+@router.message(Command("export_csv"))
+async def export_csv(m: Message):
+    """Экспорт всех клиентов и заказов (включая удалённые) в два CSV-файла"""
+    try:
+        async with get_db() as db:
+            # Клиенты
+            cur = await db.execute("SELECT * FROM crm_customers")
+            customers = [dict(r) for r in await cur.fetchall()]
+            # Заказы
+            cur = await db.execute("SELECT * FROM crm_orders")
+            orders = [dict(r) for r in await cur.fetchall()]
+
+        # Готовим CSV для клиентов
+        cust_buf = StringIO()
+        if customers:
+            cust_writer = csv.DictWriter(cust_buf, fieldnames=list(customers[0].keys()))
+            cust_writer.writeheader()
+            cust_writer.writerows(customers)
+        else:
+            cust_buf.write("id\n")
+
+        # Готовим CSV для заказов
+        ord_buf = StringIO()
+        if orders:
+            ord_writer = csv.DictWriter(ord_buf, fieldnames=list(orders[0].keys()))
+            ord_writer.writeheader()
+            ord_writer.writerows(orders)
+        else:
+            ord_buf.write("id\n")
+
+        # Отправляем файлы администратору
+        cust_buf.seek(0)
+        ord_buf.seek(0)
+        await m.answer_document(document=("customers.csv", cust_buf.getvalue()))
+        await m.answer_document(document=("orders.csv", ord_buf.getvalue()))
+
+    except Exception as e:
+        log.error(f"Error in export_csv: {e}")
+        await m.answer("❌ Ошибка при экспорте CSV")
 # === FSM STATES ===
 
 class OrderApprovalFSM(StatesGroup):

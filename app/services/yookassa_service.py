@@ -4,8 +4,10 @@ import uuid
 import asyncio
 import aiohttp
 import base64
+import random
 from typing import Optional, Dict, Any
 from datetime import datetime
+from decimal import Decimal
 
 from ..config import settings
 
@@ -57,15 +59,24 @@ class YooKassaService:
             if self._mock_mode:
                 return self._create_mock_payment(order_id, amount, description)
             
+            # Валидация HTTPS для return_url
+            ret_url = return_url or settings.yookassa_return_url or "https://t.me/ZakazPOIZBot"
+            if not ret_url.lower().startswith("https://"):
+                log.error("YOOKASSA_RETURN_URL must be HTTPS")
+                return None
+            
+            # Форматируем amount через Decimal для точности
+            amount_decimal = Decimal(str(amount)).quantize(Decimal('0.01'))
+            
             # Подготавливаем данные для API
             payment_data = {
                 "amount": {
-                    "value": f"{amount:.2f}",
+                    "value": str(amount_decimal),
                     "currency": "RUB"
                 },
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": return_url or settings.yookassa_return_url or "https://t.me/ZakazPOIZBot"
+                    "return_url": ret_url
                 },
                 "capture": True,
                 "description": description,
@@ -75,41 +86,79 @@ class YooKassaService:
                 }
             }
             
-            # Отправляем HTTP запрос к YooKassa API
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/payments",
-                    json=payment_data,
-                    headers={
-                        "Authorization": self.auth_header,
-                        "Content-Type": "application/json",
-                        "Idempotence-Key": str(uuid.uuid4())
-                    }
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        
-                        log.info(f"Created YooKassa payment {result['id']} for order {order_id}, amount: {amount} RUB")
-                        
-                        return {
-                            "id": result["id"],
-                            "status": result["status"],
-                            "url": result["confirmation"]["confirmation_url"],
-                            "amount": amount,
-                            "currency": "RUB",
-                            "description": description,
-                            "metadata": result.get("metadata", {}),
-                            "created_at": result["created_at"]
-                        }
-                    else:
-                        error_text = await response.text()
-                        log.error(f"YooKassa API error {response.status}: {error_text}")
-                        return None
+            # Генерируем Idempotence-Key для всех ретраев
+            idempotence_key = str(uuid.uuid4())
+            timeout = aiohttp.ClientTimeout(total=30)
+            max_retries = 3
+            backoff = 1.0
+            
+            # Отправляем HTTP запрос к YooKassa API с ретраями
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        async with session.post(
+                            f"{self.base_url}/payments",
+                            json=payment_data,
+                            headers={
+                                "Authorization": self.auth_header,
+                                "Content-Type": "application/json",
+                                "Idempotence-Key": idempotence_key
+                            }
+                        ) as response:
+                            if response.status in (200, 201):
+                                result = await response.json()
+                                
+                                log.info(f"Created YooKassa payment {result['id']} for order {order_id}, amount: {amount} RUB (attempt {attempt})")
+                                
+                                return {
+                                    "id": result["id"],
+                                    "status": result["status"],
+                                    "url": result["confirmation"]["confirmation_url"],
+                                    "amount": float(amount_decimal),
+                                    "currency": "RUB",
+                                    "description": description,
+                                    "metadata": result.get("metadata", {}),
+                                    "created_at": result["created_at"]
+                                }
+                            elif response.status in (429, 500, 502, 503, 504):
+                                # Retry with same Idempotence-Key
+                                error_text = await response.text()
+                                log.warning(f"YooKassa {response.status} on create_payment, retry {attempt}/{max_retries}: {error_text}")
+                            else:
+                                error_text = await response.text()
+                                log.error(f"YooKassa unexpected status {response.status}: {error_text}")
+                                return None
+                                
+                    except asyncio.TimeoutError:
+                        log.warning(f"Timeout on create_payment, retry {attempt}/{max_retries}")
+                    except Exception as e:
+                        log.error(f"Error create_payment attempt {attempt}: {e}")
+                    
+                    # Exponential backoff with jitter
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff + random.uniform(0, 0.5))
+                        backoff *= 2
+                
+                # Все ретраи исчерпаны - пытаемся получить статус по idempotence key
+                log.error(f"All retries failed for order {order_id}, idempotence_key: {idempotence_key}")
+                
+                # При HTTP 500 пытаемся проверить статус платежа через GET
+                # (YooKassa не предоставляет GET по idempotence key, но можно попробовать найти по metadata)
+                try:
+                    # Попытка найти платеж по order_id в metadata через GET /payments
+                    # Это не идеальное решение, но может помочь в некоторых случаях
+                    log.info(f"Attempting to check payment status for order {order_id} after creation failure")
+                    # Здесь можно добавить логику поиска платежа, если YooKassa предоставит такой API
+                    # Пока что просто возвращаем None и логируем для мониторинга
+                except Exception as e:
+                    log.error(f"Failed to check payment status after creation failure: {e}")
+                
+                return None
             
         except Exception as e:
             log.error(f"Error creating YooKassa payment for order {order_id}: {e}")
-            # В случае ошибки возвращаем mock платеж
-            return self._create_mock_payment(order_id, amount, description)
+            # В проде не возвращаем mock, только в mock режиме
+            return self._mock_mode and self._create_mock_payment(order_id, amount, description) or None
     
     async def get_payment_status(self, payment_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -125,35 +174,58 @@ class YooKassaService:
             if self._mock_mode:
                 return self._get_mock_payment_status(payment_id)
             
-            # Отправляем HTTP запрос к YooKassa API
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.get(
-                    f"{self.base_url}/payments/{payment_id}",
-                    headers={
-                        "Authorization": self.auth_header,
-                        "Content-Type": "application/json"
-                    }
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        
-                        return {
-                            "id": result["id"],
-                            "status": result["status"],
-                            "amount": float(result["amount"]["value"]),
-                            "currency": result["amount"]["currency"],
-                            "description": result.get("description", ""),
-                            "metadata": result.get("metadata", {}),
-                            "created_at": result["created_at"],
-                            "paid": result.get("paid", False)
-                        }
-                    elif response.status == 404:
-                        log.warning(f"Payment {payment_id} not found in YooKassa")
-                        return None
-                    else:
-                        error_text = await response.text()
-                        log.error(f"YooKassa API error {response.status}: {error_text}")
-                        return None
+            # Отправляем HTTP запрос к YooKassa API с ретраями
+            timeout = aiohttp.ClientTimeout(total=30)
+            max_retries = 3
+            backoff = 1.0
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        async with session.get(
+                            f"{self.base_url}/payments/{payment_id}",
+                            headers={
+                                "Authorization": self.auth_header,
+                                "Content-Type": "application/json"
+                            }
+                        ) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                
+                                return {
+                                    "id": result["id"],
+                                    "status": result["status"],
+                                    "amount": float(result["amount"]["value"]),
+                                    "currency": result["amount"]["currency"],
+                                    "description": result.get("description", ""),
+                                    "metadata": result.get("metadata", {}),
+                                    "created_at": result["created_at"],
+                                    "paid": result.get("paid", False)
+                                }
+                            elif response.status == 404:
+                                log.warning(f"Payment {payment_id} not found in YooKassa")
+                                return None
+                            elif response.status in (429, 500, 502, 503, 504):
+                                # Retry on server errors
+                                error_text = await response.text()
+                                log.warning(f"YooKassa {response.status} on get_payment_status, retry {attempt}/{max_retries}: {error_text}")
+                            else:
+                                error_text = await response.text()
+                                log.error(f"YooKassa API error {response.status}: {error_text}")
+                                return None
+                                
+                    except asyncio.TimeoutError:
+                        log.warning(f"Timeout on get_payment_status, retry {attempt}/{max_retries}")
+                    except Exception as e:
+                        log.error(f"Error get_payment_status attempt {attempt}: {e}")
+                    
+                    # Exponential backoff with jitter
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff + random.uniform(0, 0.5))
+                        backoff *= 2
+                
+                log.error(f"All retries failed for get_payment_status {payment_id}")
+                return None
             
         except asyncio.TimeoutError:
             log.error(f"Timeout getting YooKassa payment status {payment_id}")

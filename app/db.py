@@ -148,6 +148,16 @@ CREATE TABLE IF NOT EXISTS payments (
     FOREIGN KEY (order_id) REFERENCES crm_orders(id) ON DELETE CASCADE
 );
 
+-- Архив удалённых сущностей (клиенты, заказы, история)
+CREATE TABLE IF NOT EXISTS archives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL, -- 'customer' | 'order' | 'order_status_history'
+    entity_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived_reason TEXT DEFAULT '',
+    archived_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Индексы для оптимизации
 CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON crm_orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON crm_orders(status);
@@ -159,6 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_status_history_order ON order_status_history(orde
 CREATE INDEX IF NOT EXISTS idx_customers_ref_code ON crm_customers(ref_code);
 CREATE INDEX IF NOT EXISTS idx_customers_invited_by ON crm_customers(invited_by);
 CREATE INDEX IF NOT EXISTS idx_customers_created_at ON crm_customers(created_at);
+CREATE INDEX IF NOT EXISTS idx_archives_entity ON archives(entity_type, entity_id);
 """
 
 @asynccontextmanager

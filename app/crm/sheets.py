@@ -938,10 +938,26 @@ async def sync_db_to_sheets():
             
             log.info(f"Найдено для удаления: {len(orders_to_delete)} заказов, {len(customers_to_delete)} клиентов")
             
-            # Удаляем заказы из Sheets
+            # Удаляем заказы из Sheets (с предварительным архивированием)
             orders_deleted = 0
             for order in orders_to_delete:
                 ext_id = order.get("ext_id") or order.get("id")
+                if ext_id:
+                    # Архивируем заказ из БД перед удалением строки
+                    try:
+                        async with get_db() as db2:
+                            cur2 = await db2.execute("SELECT * FROM crm_orders WHERE id=?", (order.get("id"),))
+                            row2 = await cur2.fetchone()
+                            if row2:
+                                from json import dumps
+                                await db2.execute(
+                                    "INSERT INTO archives(entity_type, entity_id, payload_json, archived_reason) VALUES(?, ?, ?, ?)",
+                                    ("order", order.get("id"), dumps(dict(row2), ensure_ascii=False), "sheets_row_deleted")
+                                )
+                                await db2.commit()
+                    except Exception as e:
+                        log.error(f"Failed to archive order {order.get('id')} before Sheets deletion: {e}")
+
                 if ext_id and delete_row_by_ext_id(SHEET_NAMES["ORDERS"], str(ext_id)):
                     # Очищаем sheet_row_id в БД после успешного удаления
                     await db.execute(
@@ -950,10 +966,26 @@ async def sync_db_to_sheets():
                     )
                     orders_deleted += 1
             
-            # Удаляем клиентов из Sheets
+            # Удаляем клиентов из Sheets (с предварительным архивированием)
             customers_deleted = 0
             for customer in customers_to_delete:
                 ext_id = customer.get("ext_id") or customer.get("id")
+                if ext_id:
+                    # Архивируем клиента из БД перед удалением строки
+                    try:
+                        async with get_db() as db2:
+                            cur2 = await db2.execute("SELECT * FROM crm_customers WHERE id=?", (customer.get("id"),))
+                            row2 = await cur2.fetchone()
+                            if row2:
+                                from json import dumps
+                                await db2.execute(
+                                    "INSERT INTO archives(entity_type, entity_id, payload_json, archived_reason) VALUES(?, ?, ?, ?)",
+                                    ("customer", customer.get("id"), dumps(dict(row2), ensure_ascii=False), "sheets_row_deleted")
+                                )
+                                await db2.commit()
+                    except Exception as e:
+                        log.error(f"Failed to archive customer {customer.get('id')} before Sheets deletion: {e}")
+
                 if ext_id and delete_row_by_ext_id(SHEET_NAMES["CUSTOMERS"], str(ext_id)):
                     # Очищаем sheet_row_id в БД после успешного удаления
                     await db.execute(

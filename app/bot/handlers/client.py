@@ -43,6 +43,7 @@ class RegistrationFSM(StatesGroup):
     Address = State()
     Phone = State()
     RefCode = State()
+    Consent = State()
 
 class OrderFSM(StatesGroup):
     OrderType = State()
@@ -57,6 +58,29 @@ class AccountFSM(StatesGroup):
     DeleteConfirm = State()
 
 # === UTILITY FUNCTIONS ===
+
+@router.message(RegistrationFSM.Consent)
+async def process_consent(m: Message, state: FSMContext):
+    """Обработка согласия на обработку персональных данных"""
+    text = (m.text or "").strip().lower()
+    if text == "да":
+        # Переходим к шагу адреса
+        await state.set_state(RegistrationFSM.Address)
+        await m.answer(
+            "🎉 <b>Добро пожаловать в ZakazPOIZ!</b>\n\n"
+            "📍 <b>Шаг 1/3:</b> Укажите ваш адрес доставки:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    if text == "нет":
+        await state.clear()
+        await m.answer(
+            "❌ Вы не дали согласие на обработку персональных данных.\n\n"
+            "Если передумаете — перезапустите бота командой /start",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    await m.answer("Пожалуйста, выберите: Да или Нет", reply_markup=kb_consent())
 
 async def notify_admins_new_order(bot: Bot, order_id: str, customer_id: str, order_type: str, reference: str, size: str = ""):
     """Уведомляет всех админов о новом заказе с inline-кнопками"""
@@ -154,18 +178,23 @@ async def start_command(m: Message, state: FSMContext):
             )
             user_data = await cur.fetchone()
 
-        # Проверяем: если пользователь существует И не удален
+        # Проверяем: если пользователь существует И не удален — показываем меню
         if user_data and not user_data['deleted_in_sheets_at']:
             await m.answer("👟 Добро пожаловать обратно! Выберите действие:", reply_markup=kb_main_menu())
             return
 
-        # Новый пользователь - регистрация
+        # Новый пользователь — сперва запрос согласия на обработку персональных данных
+        await state.set_state(RegistrationFSM.Consent)
         await m.answer(
-            "🎉 <b>Добро пожаловать в ZakazPOIZ!</b>\n\n"
-            "📍 <b>Шаг 1/3:</b> Укажите ваш адрес доставки:",
-            reply_markup=ReplyKeyboardRemove()
+            "📄 <b>Согласие на обработку персональных данных</b>\n\n"
+            "Нажимая 'Да', вы подтверждаете согласие на:\n"
+            "• хранение вашего телефона и адреса для оформления заказов;\n"
+            "• передачу данных для обработки заказа;\n"
+            "• получение уведомлений в Telegram о статусах заказа.\n\n"
+            "Вы согласны?",
+            reply_markup=kb_consent()
         )
-        await state.set_state(RegistrationFSM.Address)
+        # Далее обработка ответа в отдельном хэндлере
 
     except Exception as e:
         log.error(f"Error in start handler for user {m.from_user.id}: {e}", exc_info=True)
@@ -452,9 +481,9 @@ async def my_account(m: Message):
                 await m.answer("❌ Ваш аккаунт не найден. Попробуйте перезапустить бота командой /start")
                 return
             
-            # Получаем количество заказов
+            # Получаем количество НЕ удалённых заказов
             cur = await db.execute(
-                "SELECT COUNT(*) as count FROM crm_orders WHERE customer_id=?",
+                "SELECT COUNT(*) as count FROM crm_orders WHERE customer_id=? AND deleted_in_sheets_at IS NULL",
                 (user_id,)
             )
             orders_count = (await cur.fetchone())["count"]
@@ -465,8 +494,6 @@ async def my_account(m: Message):
             f"<b>ID:</b> {user['id']}",
             f"<b>Телефон:</b> {user['phone'] or 'Не указан'}",
             f"<b>Адрес:</b> {user['address'] or 'Не указан'}",
-            f"<b>Реф. код:</b> {user['ref_code'] or 'Не указан'}",
-            f"<b>Приглашен:</b> {user['invited_by'] or 'Нет'}",
             f"<b>Заказов:</b> {orders_count}",
             f"<b>Создан:</b> {user['created_at'].split()[0] if user['created_at'] else 'Н/Д'}"
         ]
@@ -1070,15 +1097,25 @@ async def process_delete_account(m: Message, state: FSMContext, bot: Bot):
         )
         
         try:
-            # Помечаем клиента как удаленного в БД
+            # Архивируем и помечаем клиента как удаленного в БД
             async with get_db() as db:
                 # Получаем информацию о клиенте для логирования
                 cur = await db.execute(
-                    "SELECT phone, address, order_ids_json FROM crm_customers WHERE id=?",
+                    "SELECT * FROM crm_customers WHERE id=?",
                     (customer_id,)
                 )
                 customer_data = await cur.fetchone()
                 
+                # Архивируем клиента
+                try:
+                    from json import dumps
+                    await db.execute(
+                        "INSERT INTO archives(entity_type, entity_id, payload_json, archived_reason) VALUES(?, ?, ?, ?)",
+                        ("customer", customer_id, dumps(dict(customer_data) if customer_data else {} , ensure_ascii=False), "account_deleted")
+                    )
+                except Exception as e:
+                    log.error(f"Failed to archive customer {customer_id}: {e}")
+
                 # Помечаем клиента как удаленного
                 await db.execute(
                     "UPDATE crm_customers SET "
@@ -1089,6 +1126,24 @@ async def process_delete_account(m: Message, state: FSMContext, bot: Bot):
                     (customer_id,)
                 )
                 
+                # Получаем заказы клиента для архива
+                cur = await db.execute(
+                    "SELECT * FROM crm_orders WHERE customer_id=?",
+                    (customer_id,)
+                )
+                orders_to_archive = [dict(r) for r in await cur.fetchall()]
+
+                # Архивируем заказы
+                try:
+                    from json import dumps
+                    for order in orders_to_archive:
+                        await db.execute(
+                            "INSERT INTO archives(entity_type, entity_id, payload_json, archived_reason) VALUES(?, ?, ?, ?)",
+                            ("order", order.get("id"), dumps(order, ensure_ascii=False), "account_deleted")
+                        )
+                except Exception as e:
+                    log.error(f"Failed to archive orders for customer {customer_id}: {e}")
+
                 # Помечаем все заказы клиента как удаленные
                 await db.execute(
                     "UPDATE crm_orders SET "
@@ -1099,6 +1154,22 @@ async def process_delete_account(m: Message, state: FSMContext, bot: Bot):
                     (customer_id,)
                 )
                 
+                # Архивируем историю статусов заказов клиента
+                try:
+                    cur = await db.execute(
+                        "SELECT * FROM order_status_history WHERE order_id IN (SELECT id FROM crm_orders WHERE customer_id=?)",
+                        (customer_id,)
+                    )
+                    histories = [dict(r) for r in await cur.fetchall()]
+                    from json import dumps
+                    for h in histories:
+                        await db.execute(
+                            "INSERT INTO archives(entity_type, entity_id, payload_json, archived_reason) VALUES(?, ?, ?, ?)",
+                            ("order_status_history", h.get("order_id"), dumps(h, ensure_ascii=False), "account_deleted")
+                        )
+                except Exception as e:
+                    log.error(f"Failed to archive status history for customer {customer_id}: {e}")
+
                 await db.commit()
                 
                 # Логируем действие
@@ -1112,22 +1183,9 @@ async def process_delete_account(m: Message, state: FSMContext, bot: Bot):
                     }
                 )
             
-            # Запускаем полную синхронизацию
+            # Запускаем полную синхронизацию (без промежуточных сообщений)
             from app.services.sync_manager import run_full_sync
-            
-            # Пытаемся обновить сообщение, но если не получится - отправим новое
-            try:
-                await status_msg.edit_text(
-                    "🔄 <b>Синхронизация данных...</b>\n\n"
-                    "Удаляем данные из Google Sheets..."
-                )
-            except:
-                await m.answer(
-                    "🔄 <b>Синхронизация данных...</b>\n\n"
-                    "Удаляем данные из Google Sheets..."
-                )
-            
-            sync_results = await run_full_sync(bot)
+            await run_full_sync(bot)
             
             # Очищаем состояние
             await state.clear()
