@@ -864,7 +864,7 @@ async def confirm_calculation(cq: CallbackQuery, state: FSMContext, bot: Bot):
                     int(customer_id),
                     f"🎉 <b>Ваш заказ #{order_id} одобрен!</b>\n\n"
                     f"💰 <b>Сумма к оплате:</b> {total_rub} ₽\n\n"
-                    f"Для подтверждения оплаты нажмите кнопку ниже:",
+                    f"Для подтвержденияawait оплаты нажмите кнопку ниже:",
                     reply_markup=ikb_payment_test_button(order_id)
                 )
         except Exception as e:
@@ -927,21 +927,21 @@ async def process_reject_reason(m: Message, state: FSMContext, bot: Bot):
                 (ORDER_STATUSES["REJECTED"], order_id)
             )
             await db.commit()
-        
+            
         # Добавляем в историю статусов (вне блока get_db)
-        await add_status_history(
-            order_id, 
-            "", 
+            await add_status_history(
+                order_id, 
+                "", 
             ORDER_STATUSES["REJECTED"], 
-            f"admin_{m.from_user.id}", 
-            f"order_rejected: {reason}"
-        )
-        
+                f"admin_{m.from_user.id}", 
+                f"order_rejected: {reason}"
+            )
+            
         # Логируем действие (вне блока get_db)
-        await log_action(str(m.from_user.id), "order_rejected", {
-            "order_id": order_id,
-            "reason": reason
-        })
+            await log_action(str(m.from_user.id), "order_rejected", {
+                "order_id": order_id,
+                "reason": reason
+            })
         
         # Уведомляем клиента
         try:
