@@ -62,17 +62,18 @@ class AccountFSM(StatesGroup):
 @router.message(RegistrationFSM.Consent)
 async def process_consent(m: Message, state: FSMContext):
     """Обработка согласия на обработку персональных данных"""
-    text = (m.text or "").strip().lower()
-    if text == "да":
+    text = (m.text or "").strip()
+    if "подтвердить" in text.lower() or text == "Подтвердить ✅":
         # Переходим к шагу адреса
         await state.set_state(RegistrationFSM.Address)
         await m.answer(
             "🎉 <b>Добро пожаловать в ZakazPOIZ!</b>\n\n"
             "📍 <b>Шаг 1/3:</b> Укажите ваш адрес доставки:",
+            "Формат: Город, Улица, Дом, Корпус",
             reply_markup=ReplyKeyboardRemove()
         )
         return
-    if text == "нет":
+    if "отказаться" in text.lower() or text == "Отказаться ❌":
         await state.clear()
         await m.answer(
             "❌ Вы не дали согласие на обработку персональных данных.\n\n"
@@ -80,7 +81,7 @@ async def process_consent(m: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
         return
-    await m.answer("Пожалуйста, выберите: Да или Нет", reply_markup=kb_consent())
+    await m.answer("Пожалуйста, выберите: Подтвердить ✅ или Отказаться ❌", reply_markup=kb_consent())
 
 async def notify_admins_new_order(bot: Bot, order_id: str, customer_id: str, order_type: str, reference: str, size: str = ""):
     """Уведомляет всех админов о новом заказе с inline-кнопками"""
@@ -185,12 +186,31 @@ async def start_command(m: Message, state: FSMContext):
 
         # Новый пользователь — сперва запрос согласия на обработку персональных данных
         await state.set_state(RegistrationFSM.Consent)
+        
+        # Отправляем пользовательское соглашение
+        try:
+            from pathlib import Path
+            from aiogram.types import FSInputFile
+            
+            agreement_path = Path(__file__).parent.parent.parent / "Пользовательское соглашение PoizShop.pdf"
+            if agreement_path.exists():
+                document = FSInputFile(agreement_path)
+                await m.answer_document(
+                    document=document,
+                    caption="📄 <b>Пользовательское соглашение</b>\n\nПожалуйста, ознакомьтесь с документом."
+                )
+            else:
+                log.warning(f"User agreement file not found at {agreement_path}")
+        except Exception as e:
+            log.error(f"Failed to send user agreement: {e}", exc_info=True)
+        
         await m.answer(
             "📄 <b>Согласие на обработку персональных данных</b>\n\n"
-            "Нажимая 'Да', вы подтверждаете согласие на:\n"
+            "Нажимая 'Подтвердить', вы подтверждаете согласие на:\n"
             "• хранение вашего телефона и адреса для оформления заказов;\n"
             "• передачу данных для обработки заказа;\n"
-            "• получение уведомлений в Telegram о статусах заказа.\n\n"
+            "• получение уведомлений в Telegram о статусах заказа;\n"
+            "• ознакомление с пользовательским соглашением.\n\n"
             "Вы согласны?",
             reply_markup=kb_consent()
         )

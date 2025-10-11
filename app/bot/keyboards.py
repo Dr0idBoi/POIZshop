@@ -10,7 +10,8 @@ def kb_consent():
     """Клавиатура согласия"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]
+            [KeyboardButton(text="Подтвердить ✅")],
+            [KeyboardButton(text="Отказаться ❌")]
         ],
         resize_keyboard=True, 
         one_time_keyboard=True
