@@ -272,6 +272,7 @@ async def add_admin(m: Message):
             return
         
         # Проверяем, не является ли уже админом
+        is_new_admin = False
         async with get_db() as db:
             cur = await db.execute(
                 "SELECT * FROM admins WHERE tg_user_id=?", 
@@ -299,11 +300,13 @@ async def add_admin(m: Message):
                 )
                 await db.commit()
                 await m.answer(f"✅ Пользователь {new_admin_id} добавлен как администратор")
-                
-                # Логируем действие
-                await log_action(str(m.from_user.id), "admin_added", {
-                    "new_admin_id": new_admin_id
-                })
+                is_new_admin = True
+        
+        # Логируем действие (вне блока get_db)
+        if is_new_admin:
+            await log_action(str(m.from_user.id), "admin_added", {
+                "new_admin_id": new_admin_id
+            })
         
     except Exception as e:
         log.error(f"Error in add_admin: {e}")
@@ -333,6 +336,7 @@ async def remove_admin(m: Message):
             await m.answer("❌ Нельзя удалить владельца бота")
             return
         
+        was_removed = False
         async with get_db() as db:
             cur = await db.execute(
                 "SELECT * FROM admins WHERE tg_user_id=?", 
@@ -351,8 +355,10 @@ async def remove_admin(m: Message):
             )
             await db.commit()
             await m.answer(f"✅ Администратор {admin_id} удален")
-            
-            # Логируем действие
+            was_removed = True
+        
+        # Логируем действие (вне блока get_db)
+        if was_removed:
             await log_action(str(m.from_user.id), "admin_removed", {
                 "removed_admin_id": admin_id
             })
@@ -751,7 +757,7 @@ async def confirm_calculation(cq: CallbackQuery, state: FSMContext, bot: Bot):
             )
             await db.commit()
             
-            # Добавляем в историю статусов
+        # Добавляем в историю статусов (вне блока get_db)
             await add_status_history(
                 order_id, 
                 "", 
@@ -760,7 +766,7 @@ async def confirm_calculation(cq: CallbackQuery, state: FSMContext, bot: Bot):
                 "order_approved"
             )
             
-            # Логируем действие
+        # Логируем действие (вне блока get_db)
             await log_action(str(cq.from_user.id), "order_approved", {
                 "order_id": order_id,
                 "poizon_price": poizon_price,
@@ -921,21 +927,21 @@ async def process_reject_reason(m: Message, state: FSMContext, bot: Bot):
                 (ORDER_STATUSES["REJECTED"], order_id)
             )
             await db.commit()
-            
-            # Добавляем в историю статусов
-            await add_status_history(
-                order_id, 
-                "", 
-                ORDER_STATUSES["REJECTED"], 
-                f"admin_{m.from_user.id}", 
-                f"order_rejected: {reason}"
-            )
-            
-            # Логируем действие
-            await log_action(str(m.from_user.id), "order_rejected", {
-                "order_id": order_id,
-                "reason": reason
-            })
+        
+        # Добавляем в историю статусов (вне блока get_db)
+        await add_status_history(
+            order_id, 
+            "", 
+            ORDER_STATUSES["REJECTED"], 
+            f"admin_{m.from_user.id}", 
+            f"order_rejected: {reason}"
+        )
+        
+        # Логируем действие (вне блока get_db)
+        await log_action(str(m.from_user.id), "order_rejected", {
+            "order_id": order_id,
+            "reason": reason
+        })
         
         # Уведомляем клиента
         try:
