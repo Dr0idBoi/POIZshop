@@ -63,25 +63,23 @@ class AccountFSM(StatesGroup):
 async def process_consent(m: Message, state: FSMContext):
     """Обработка согласия на обработку персональных данных"""
     text = (m.text or "").strip()
-    if "подтвердить" in text.lower() or text == "Подтвердить ✅":
+    if "согласиться" in text.lower() or text == "✅ Согласиться с условиями":
         # Переходим к шагу адреса
         await state.set_state(RegistrationFSM.Address)
         await m.answer(
             "🎉 <b>Добро пожаловать в ZakazPOIZ!</b>\n\n"
-            "📍 <b>Шаг 1/3:</b> Укажите ваш адрес доставки:",
-            "Формат: Город, Улица, Дом, Корпус",
+            "📍 <b>Шаг 1/3:</b> Укажите ваш адрес доставки:\n"
+            " Формат: Город, Улица, Дом, Корпус(опционально)",
             reply_markup=ReplyKeyboardRemove()
         )
         return
-    if "отказаться" in text.lower() or text == "Отказаться ❌":
-        await state.clear()
-        await m.answer(
-            "❌ Вы не дали согласие на обработку персональных данных.\n\n"
-            "Если передумаете — перезапустите бота командой /start",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-    await m.answer("Пожалуйста, выберите: Подтвердить ✅ или Отказаться ❌", reply_markup=kb_consent())
+    
+    # Если пользователь прислал что-то другое
+    await m.answer(
+        "Пожалуйста, нажмите кнопку \"✅ Согласиться с условиями\" для продолжения регистрации.\n\n"
+        "Если вы не хотите продолжать, просто закройте бота.",
+        reply_markup=kb_consent()
+    )
 
 async def notify_admins_new_order(bot: Bot, order_id: str, customer_id: str, order_type: str, reference: str, size: str = ""):
     """Уведомляет всех админов о новом заказе с inline-кнопками"""
@@ -197,21 +195,31 @@ async def start_command(m: Message, state: FSMContext):
                 document = FSInputFile(agreement_path)
                 await m.answer_document(
                     document=document,
-                    caption="📄 <b>Пользовательское соглашение</b>\n\nПожалуйста, ознакомьтесь с документом."
+                    caption=(
+                        "Нажимая \"Согласиться с условиями\", вы подтверждаете, что:\n"
+                        "• Ознакомились с Пользовательским соглашением и принимаете его условия"
+                    )
                 )
             else:
                 log.warning(f"User agreement file not found at {agreement_path}")
+                await m.answer(
+                    "Нажимая \"Согласиться с условиями\", вы подтверждаете, что:\n"
+                    "• Ознакомились с Пользовательским соглашением и принимаете его условия",
+                    reply_markup=kb_consent()
+                )
+                return
         except Exception as e:
             log.error(f"Failed to send user agreement: {e}", exc_info=True)
+            await m.answer(
+                "Нажимая \"Согласиться с условиями\", вы подтверждаете, что:\n"
+                "• Ознакомились с Пользовательским соглашением и принимаете его условия",
+                reply_markup=kb_consent()
+            )
+            return
         
+        # Показываем клавиатуру согласия
         await m.answer(
-            "📄 <b>Согласие на обработку персональных данных</b>\n\n"
-            "Нажимая 'Подтвердить', вы подтверждаете согласие на:\n"
-            "• хранение вашего телефона и адреса для оформления заказов;\n"
-            "• передачу данных для обработки заказа;\n"
-            "• получение уведомлений в Telegram о статусах заказа;\n"
-            "• ознакомление с пользовательским соглашением.\n\n"
-            "Вы согласны?",
+            "Выберите действие:",
             reply_markup=kb_consent()
         )
         # Далее обработка ответа в отдельном хэндлере
