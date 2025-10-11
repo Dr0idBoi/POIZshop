@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS crm_orders (
     size TEXT DEFAULT '',
     carrier TEXT DEFAULT '',
     tracking TEXT DEFAULT '',
-    status TEXT DEFAULT 'Ожидает оплату' CHECK (status IN ('Ожидает оплату', 'Оплачен', 'В пути по Китаю', 'На пути на склад', 'На пути к получателю', 'Выдано', 'Закрыт', 'Отмена')),
+    status TEXT DEFAULT 'Ожидает оплату' CHECK (status IN ('Ожидает решения', 'Ожидает оплату', 'Отклонён', 'Оплачен', 'В пути по Китаю', 'На пути на склад', 'На пути к получателю', 'Выдано', 'Закрыт', 'Отмена')),
     poizon_price REAL DEFAULT 0.0,
     order_cost_var REAL DEFAULT 0.0,
     order_cost_fixed REAL DEFAULT 0.0,
