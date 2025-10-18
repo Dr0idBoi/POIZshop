@@ -17,7 +17,7 @@ from app.validators import (
 from app.bot.keyboards import (
     kb_consent, kb_share_phone, kb_order_type, kb_main_menu,
     kb_address_menu, kb_account_menu, kb_cancel, kb_sizes,
-    ikb_admin_order_actions, ikb_payment_test_button, ikb_payment_button
+    ikb_admin_order_actions, ikb_payment_test_button, ikb_payment_button, ikb_open_payment_bot
 )
 from app.crm.sheets import partial_update_by_ext_id, sync_db_to_sheets
 from app.bot.middlewares import ClientOnly
@@ -26,7 +26,7 @@ from app.bot.fsm_utils import (
     is_fsm_processing, set_fsm_processing, handle_cancel_command,
     validate_message_length
 )
-
+from app.config import settings
 log = logging.getLogger("client")
 router = Router(name="client")
 # Убрали ClientOnly middleware - проверка будет в самих handlers
@@ -768,157 +768,27 @@ async def create_order(m: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data.startswith("ORDER:PAID_TEST:"))
 async def cb_order_paid_test(cq: CallbackQuery, bot: Bot):
-    """Обработка нажатия кнопки 'Оплачено (тест)'"""
-    order_id = cq.data.split(":", 2)[2]
-    
-    try:
-        async with get_db() as db:
-            # Проверяем существование заказа
-            cur = await db.execute(
-                "SELECT status, customer_id, ext_id, rev FROM crm_orders WHERE id=?", 
-                (order_id,)
-            )
-            order = await cur.fetchone()
-            
-            if not order:
-                await cq.answer("Заказ не найден", show_alert=True)
-                return
-                
-            # Проверяем, что заказ в статусе "Ожидает оплату"
-            if order["status"] != ORDER_STATUSES["AWAITING_PAYMENT"]:
-                await cq.answer(f"Заказ уже в статусе '{order['status']}'", show_alert=True)
-                return
-                
-            # Проверяем, что заказ принадлежит этому пользователю
-            if str(order["customer_id"]) != str(cq.from_user.id):
-                await cq.answer("Этот заказ вам не принадлежит", show_alert=True)
-                return
-                
-            # Обновляем статус в БД
-            old_status = order["status"]
-            new_status = ORDER_STATUSES["PAID"]
-            new_rev = order["rev"] + 1
-            
-            await db.execute(
-                "UPDATE crm_orders SET status=?, rev=?, updated_at=datetime('now') WHERE id=?",
-                (new_status, new_rev, order_id)
-            )
-            await db.commit()
-            
-            # Добавляем в историю статусов
-            await add_status_history(
-                order_id, 
-                old_status, 
-                new_status, 
-                f"client_{cq.from_user.id}", 
-                "payment_confirmed"
-            )
-            
-            # Логируем действие
-            await log_action(str(cq.from_user.id), "payment_confirmed", {
-                "order_id": order_id, 
-                "old_status": old_status, 
-                "new_status": new_status
-            })
-        
-        # Обновляем статус в Google Sheets
-        ext_id = order["ext_id"] or order_id
-        
-        # Подготавливаем данные для обновления
-        changes = {
-            "STATUS": new_status,
-            "REV": new_rev,
-            "UPDATED_AT": datetime.now().isoformat()
-        }
-        
-        # Обновляем в Sheets
-        try:
-            result = partial_update_by_ext_id(SHEET_NAMES["ORDERS"], ext_id, changes)
-            if result:
-                log.info(f"Статус заказа {order_id} обновлен в Sheets")
-            else:
-                log.warning(f"Не удалось обновить статус заказа {order_id} в Sheets")
-        except Exception as e:
-            log.error(f"Ошибка обновления статуса в Sheets: {e}")
-        
-        # Уведомляем пользователя
-        await cq.message.answer(
-            f"✅ <b>Оплата заказа #{order_id} подтверждена</b>\n\n"
-            f"Статус заказа изменен на '{new_status}'\n\n"
-            f"Мы уведомим вас о дальнейших изменениях статуса."
-        )
-        
-        # Уведомляем админа
-        try:
-            await bot.send_message(
-                settings.owner_id,
-                f"💰 <b>Клиент подтвердил оплату заказа #{order_id}</b>\n\n"
-                f"Статус изменен на '{new_status}'"
-            )
-        except Exception as e:
-            log.error(f"Failed to notify admin about payment: {e}")
-        
-        await cq.answer("Оплата подтверждена")
-        
-    except Exception as e:
-        log.error(f"Error in cb_order_paid_test: {e}")
-        await cq.answer("Ошибка при обработке оплаты", show_alert=True)
+    pay_url = settings.payment_bot_url or "https://t.me/YourPaymentsBot"
+    await cq.message.answer(
+        "✅ Подтверждение оплаты в этом боте отключено.\n"
+        "Перейдите во второго бота и произведите оплату.",
+        reply_markup=ikb_open_payment_bot(pay_url, "Открыть второго бота")
+    )
+    await cq.answer()
 
 @router.callback_query(F.data.startswith("ORDER:PAY_YOOKASSA:"))
 async def cb_order_pay_yookassa(cq: CallbackQuery, bot: Bot):
-    """Обработка кнопки оплаты через YooKassa"""
     try:
         order_id = cq.data.split(":", 2)[2]
-        
-        # Проверяем заказ
-        async with get_db() as db:
-            cur = await db.execute(
-                "SELECT id, customer_id, status, final_price FROM crm_orders WHERE id=?",
-                (order_id,)
-            )
-            order = await cur.fetchone()
-            
-            if not order:
-                await cq.answer("Заказ не найден", show_alert=True)
-                return
-                
-            # Проверяем, что заказ в статусе "Ожидает оплату"
-            if order["status"] != ORDER_STATUSES["AWAITING_PAYMENT"]:
-                await cq.answer(f"Заказ уже в статусе '{order['status']}'", show_alert=True)
-                return
-                
-            # Проверяем, что заказ принадлежит этому пользователю
-            if str(order["customer_id"]) != str(cq.from_user.id):
-                await cq.answer("Это не ваш заказ", show_alert=True)
-                return
-        
-        # Получаем данные платежа из БД
-        async with get_db() as db:
-            cur = await db.execute(
-                "SELECT payment_url FROM crm_orders WHERE id=?",
-                (order_id,)
-            )
-            order_data = await cur.fetchone()
-            
-            if not order_data or not order_data["payment_url"]:
-                await cq.answer("Ссылка на оплату не найдена. Обратитесь к администратору.", show_alert=True)
-                return
-        
-        # Отправляем ссылку на оплату
-        await cq.message.answer(
-            f"💳 <b>Оплата заказа #{order_id}</b>\n\n"
-            f"💰 <b>Сумма:</b> {order['final_price']} ₽\n\n"
-            f"Для оплаты перейдите по ссылке:\n{order_data['payment_url']}\n\n"
-            f"ℹ️ <i>После успешной оплаты статус заказа обновится автоматически в течение 2-3 минут</i>",
-            reply_markup=kb_main_menu()
-        )
-        
-        await cq.answer("Ссылка на оплату отправлена")
-        
-    except Exception as e:
-        log.error(f"Error in cb_order_pay_yookassa: {e}")
-        await cq.answer("Ошибка при получении ссылки на оплату", show_alert=True)
+    except Exception:
+        order_id = "UNKNOWN"
 
+    pay_url = settings.payment_bot_url or "https://t.me/YourPaymentsBot"
+    await cq.message.answer(
+        f"💳 Оплата для заказа #{order_id} теперь принимается во <b>втором боте</b>.",
+        reply_markup=ikb_open_payment_bot(pay_url, "Открыть второго бота")
+    )
+    await cq.answer()
 # === УПРАВЛЕНИЕ АДРЕСОМ ===
 
 @router.message(F.text == "Изменить адрес")

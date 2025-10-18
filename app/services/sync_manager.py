@@ -128,31 +128,25 @@ class FullSyncManager:
                 "message": str(e)
             }
     
-    async def _check_payments(self):
-        """Шаг 3: Проверка статусов платежей YooKassa"""
+    # app/services/sync_manager.py  (замените метод _check_payments)
+        # app/services/sync_manager.py  (замените метод _check_payments)
+    async def _check_payments(self) -> None:
+        """
+        [DISABLED] Раньше тут был авточек YooKassa.
+        Теперь оплаты отмечаются вручную в таблице — шаг пропускаем.
+        """
         step_name = "check_payments"
-        log.info("Step 3/5: Checking YooKassa payment statuses...")
-        
+        # если у тебя есть self.logger/self.results — заполним их, чтобы отчёт был красивым
         try:
-            from ..services.payments import check_all_pending_payments
-            
-            updated_count = await check_all_pending_payments()
-            
-            self.results["steps"][step_name] = {
-                "status": "success",
-                "message": f"Checked payments, {updated_count} updated",
-                "updated_count": updated_count
-            }
-            log.info(f"✅ Step 3/5: Payment check completed ({updated_count} updated)")
-            
-        except Exception as e:
-            log.error(f"❌ Step 3/5 failed: {e}", exc_info=True)
-            self.results["success"] = False
-            self.results["errors"].append(f"check_payments: {str(e)}")
-            self.results["steps"][step_name] = {
-                "status": "error",
-                "message": str(e)
-            }
+            if hasattr(self, "logger"):
+                self.logger.info("Step 3/5: Skipping payment checks (disabled).")
+            if hasattr(self, "results"):
+                self.results.setdefault("steps", {})[step_name] = {
+                    "status": "skipped",
+                    "message": "Payment auto-check disabled; manual via Sheets.",
+                }
+        except Exception:
+            pass
     
     async def _update_exchange_rates(self):
         """Шаг 4: Обновление курсов валют"""

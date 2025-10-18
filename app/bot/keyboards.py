@@ -1,3 +1,4 @@
+
 # app/bot/keyboards.py
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
@@ -99,18 +100,17 @@ def kb_sizes():
     )
 
 # === INLINE KEYBOARDS ===
+def ikb_open_payment_bot(url: str, title: str = "Открыть бота") -> InlineKeyboardMarkup:
+    btn = InlineKeyboardButton(text=title, url=url)
+    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
-def ikb_payment_button(order_id: str, amount: float):
-    """Inline-клавиатура для оплаты заказа через YooKassa"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"💳 Оплатить {amount:.0f} ₽", callback_data=f"ORDER:PAY_YOOKASSA:{order_id}")]
-    ])
+def ikb_payment_button(order_id: str, amount: float) -> InlineKeyboardMarkup:
+    """[DEPRECATED] YooKassa не используется."""
+    return InlineKeyboardMarkup(inline_keyboard=[])
 
-def ikb_payment_test_button(order_id: str):
-    """Inline-клавиатура для тестовой оплаты заказа клиентом (deprecated)"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Оплачено (тест)", callback_data=f"ORDER:PAID_TEST:{order_id}")]
-    ])
+def ikb_payment_test_button(order_id: str) -> InlineKeyboardMarkup:
+    """[DEPRECATED] Ручное подтверждение клиентом отключено."""
+    return InlineKeyboardMarkup(inline_keyboard=[])
 
 def ikb_admin_order_actions(order_id: str, is_approved: bool = False):
     """

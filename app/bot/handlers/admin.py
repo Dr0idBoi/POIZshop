@@ -1,19 +1,17 @@
-# app/bot/handlers/admin.py
+# app/bot/handlers/admin.py  (фрагмент импорта — заменить)
 import logging
 from datetime import datetime
 from aiogram.filters import Command
 from aiogram import Router, F, Bot
-import re
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+
 from app.bot.middlewares import AdminOnly
 from app.db import get_db, log_action, add_status_history
-from app.services.pricing import calc_final_price, format_price_breakdown, calc_total_rub
+from app.services.pricing import calc_total_rub, format_price_breakdown  # ← оставляем
 from decimal import Decimal
 from app.services.exchange import fetch_cbr_rate
-from app.services.payments import create_payment_with_yookassa, succeed_payment
 from app.services.links import carrier_link
 from app.config import settings
 from app.services.notifications import NotificationService
@@ -22,7 +20,7 @@ from app.constants import ORDER_STATUSES, ORDER_COLUMNS, SHEET_NAMES
 from app.bot.keyboards import (
     ikb_admin_order_actions,
     ikb_confirm_calculation,
-    ikb_payment_test_button, ikb_payment_button
+    ikb_open_payment_bot,   # ← новая кнопка URL
 )
 import csv
 from io import StringIO
@@ -30,6 +28,7 @@ log = logging.getLogger("admin")
 router = Router(name="admin")
 router.message.middleware(AdminOnly())
 router.callback_query.middleware(AdminOnly())
+
 def CMD(name: str):
     return F.text.regexp(fr"^/{name}(?:@\w+)?(?:\s|$)")
 # === DATA EXPORT ===
@@ -717,168 +716,121 @@ async def process_variable_costs(m: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "CALC:CONFIRM", OrderApprovalFSM.ConfirmingCalculation)
 async def confirm_calculation(cq: CallbackQuery, state: FSMContext, bot: Bot):
-    """Подтверждение расчета и публикация заказа"""
+    """
+    Подтверждение админом итогового расчёта заказа:
+    - сохраняем суммы в БД
+    - статус -> «Ожидает оплату»
+    - публикуем полную строку в Google Sheets (включая источник/ссылку/размер)
+    - шлём клиенту URL-кнопку на второго бота
+    """
     try:
-        # Получаем все данные
         data = await state.get_data()
-        order_id = data["order_id"]
-        poizon_price = data["poizon_price"]
-        var_costs = data["var_costs"]
-        fixed_costs = data["fixed_costs"]
-        margin_pct = data["margin_pct"]
-        total_rub = data["total_rub"]
-        cny_rate = data["cny_rate"]
-        
-        # Обновляем заказ в БД
+        order_id: str = data["order_id"]
+        poizon_price = int(data["poizon_price"])
+        var_costs    = int(data["var_costs"])
+        fixed_costs  = int(data["fixed_costs"])
+        margin_pct   = int(data["margin_pct"])
+
+        # курс CNY -> итог в рублях
+        cny_rate = await fetch_cbr_rate("CNY") or 0.0
+        total_rub = calc_total_rub(
+            poizon_price, Decimal(str(cny_rate)),
+            var_costs, fixed_costs, margin_pct
+        )
+
+        # 1) Достаём из БД недостающие поля (source/ref/size + customer_id)
         async with get_db() as db:
-            # Получаем текущие данные заказа
             cur = await db.execute(
-                "SELECT customer_id, source_type, poizon_or_stock_ref, size FROM crm_orders WHERE id=?",
-                (order_id,)
+                "SELECT customer_id, source_type, poizon_or_stock_ref, size "
+                "FROM crm_orders WHERE id=?", (order_id,)
             )
-            order = await cur.fetchone()
-            
-            if not order:
-                await cq.answer("Заказ не найден", show_alert=True)
-                return
-                
-            # Обновляем заказ
+            order_row = await cur.fetchone()
+        if not order_row:
+            await cq.answer("Заказ не найден", show_alert=True)
+            return
+
+        customer_id = order_row["customer_id"]
+        source_type = order_row["source_type"]
+        poizon_ref  = order_row["poizon_or_stock_ref"]
+        size        = order_row["size"]
+
+        # 2) Обновляем заказ в БД
+        async with get_db() as db:
             await db.execute(
                 """UPDATE crm_orders SET 
-                poizon_price=?, order_cost_var=?, order_cost_fixed=?,
-                margin=?, final_price=?, status=?, awaiting_decision=0,
-                rev=rev+1, updated_at=datetime('now'), ext_id=?
-                WHERE id=?""",
+                   poizon_price=?, order_cost_var=?, order_cost_fixed=?,
+                   margin=?, final_price=?, status=?, awaiting_decision=0,
+                   rev=rev+1, updated_at=datetime('now'), ext_id=?
+                   WHERE id=?""",
                 (
                     poizon_price, var_costs, fixed_costs,
-                    margin_pct, total_rub, ORDER_STATUSES["AWAITING_PAYMENT"],
+                    margin_pct, float(total_rub), ORDER_STATUSES["AWAITING_PAYMENT"],
                     order_id, order_id
                 )
             )
             await db.commit()
-            
-        # Добавляем в историю статусов (вне блока get_db)
-            await add_status_history(
-                order_id, 
-                "", 
-                ORDER_STATUSES["AWAITING_PAYMENT"], 
-                f"admin_{cq.from_user.id}", 
-                "order_approved"
-            )
-            
-        # Логируем действие (вне блока get_db)
-            await log_action(str(cq.from_user.id), "order_approved", {
-                "order_id": order_id,
-                "poizon_price": poizon_price,
-                "var_costs": var_costs,
-                "fixed_costs": fixed_costs,
-                "margin_pct": margin_pct,
-                "total_rub": total_rub
-            })
-        
-        # Публикуем заказ в Google Sheets (используем полные названия колонок)
-        order_data = {
-            ORDER_COLUMNS["ID"]: order_id,
-            ORDER_COLUMNS["CUSTOMER_ID"]: order["customer_id"],
-            ORDER_COLUMNS["SOURCE_TYPE"]: order["source_type"],
-            ORDER_COLUMNS["POIZON_REF"]: order["poizon_or_stock_ref"],
-            ORDER_COLUMNS["SIZE"]: order["size"],
-            ORDER_COLUMNS["CARRIER"]: "",
-            ORDER_COLUMNS["TRACKING"]: "",
-            ORDER_COLUMNS["STATUS"]: ORDER_STATUSES["AWAITING_PAYMENT"],
-            ORDER_COLUMNS["POIZON_PRICE"]: poizon_price,
-            ORDER_COLUMNS["VAR_COSTS"]: var_costs,
-            ORDER_COLUMNS["FIXED_COSTS"]: fixed_costs,
-            ORDER_COLUMNS["MARGIN"]: margin_pct,
-            ORDER_COLUMNS["FINAL_PRICE"]: total_rub,
-            ORDER_COLUMNS["PAYMENT_URL"]: "",
-            ORDER_COLUMNS["PAYMENT_STATUS"]: "unpaid",
-            ORDER_COLUMNS["REV"]: 1,
-            ORDER_COLUMNS["UPDATED_AT"]: datetime.now().isoformat()
-        }
-        
-        # Добавляем строку в Sheets
-        sheet_row_id = append_order_row(order_data)
-        
-        if sheet_row_id:
-            # Обновляем sheet_row_id в БД
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE crm_orders SET sheet_row_id=? WHERE id=?",
-                    (sheet_row_id, order_id)
-                )
-                await db.commit()
-        
-        # Создаем платеж через YooKassa
-        payment_data = await create_payment_with_yookassa(
-            order_id=order_id,
-            amount=float(total_rub),
-            description=f"Оплата заказа #{order_id}"
+
+        # 3) История статусов
+        await add_status_history(
+            order_id, "", ORDER_STATUSES["AWAITING_PAYMENT"],
+            f"admin_{cq.from_user.id}", "order_approved"
         )
-        
-        # Обновляем payment_url в БД и Google Sheets сразу после создания платежа
-        if payment_data and payment_data.get('url'):
-            # Сохраняем payment_url в БД
-            try:
+
+        # 4) Публикация в Google Sheets — теперь с source/ref/size
+        try:
+            pay_url = settings.payment_bot_url or ""
+
+            order_row_for_sheets = {
+                ORDER_COLUMNS["ID"]: order_id,
+                ORDER_COLUMNS["CUSTOMER_ID"]: customer_id,
+                ORDER_COLUMNS["SOURCE_TYPE"]: source_type,
+                ORDER_COLUMNS["POIZON_REF"]: poizon_ref,
+                ORDER_COLUMNS["SIZE"]: size or "",
+                ORDER_COLUMNS["CARRIER"]: "",
+                ORDER_COLUMNS["TRACKING"]: "",
+
+                ORDER_COLUMNS["STATUS"]: ORDER_STATUSES["AWAITING_PAYMENT"],
+                ORDER_COLUMNS["POIZON_PRICE"]: poizon_price,
+                ORDER_COLUMNS["VAR_COSTS"]: var_costs,
+                ORDER_COLUMNS["FIXED_COSTS"]: fixed_costs,
+                ORDER_COLUMNS["MARGIN"]: margin_pct,
+                ORDER_COLUMNS["FINAL_PRICE"]: float(total_rub),
+
+                ORDER_COLUMNS["PAYMENT_URL"]: pay_url,
+                ORDER_COLUMNS["PAYMENT_STATUS"]: "unpaid",
+                ORDER_COLUMNS["REV"]: 1,
+                ORDER_COLUMNS["UPDATED_AT"]: datetime.now().isoformat(),
+            }
+
+            sheet_row_id = append_order_row(order_row_for_sheets)
+            if sheet_row_id:
                 async with get_db() as db:
                     await db.execute(
-                        "UPDATE crm_orders SET payment_url=?, updated_at=datetime('now'), rev=rev+1 WHERE id=?",
-                        (payment_data['url'], order_id)
+                        "UPDATE crm_orders SET sheet_row_id=? WHERE id=?",
+                        (sheet_row_id, order_id)
                     )
                     await db.commit()
-                log.info(f"Updated payment_url in DB for order {order_id}")
-            except Exception as e:
-                log.error(f"Failed to update payment_url in DB: {e}")
-            
-            # Обновляем payment_url в Google Sheets
-            try:
-                partial_update_by_ext_id(
-                    SHEET_NAMES["ORDERS"],
-                    order_id,
-                    {
-                        "PAYMENT_URL": payment_data['url'],
-                        "PAYMENT_STATUS": "unpaid",
-                        "UPDATED_AT": datetime.now().isoformat()
-                    }
-                )
-                log.info(f"Updated payment_url in Google Sheets for order {order_id}")
-            except Exception as e:
-                log.error(f"Failed to update payment_url in Sheets: {e}")
-        
-        # Уведомляем клиента
-        try:
-            customer_id = order["customer_id"]
-            if payment_data:
-                # Уведомляем клиента с реальной ссылкой на оплату
-                await bot.send_message(
-                    int(customer_id),
-                    f"🎉 <b>Ваш заказ #{order_id} одобрен!</b>\n\n"
-                    f"💰 <b>Сумма к оплате:</b> {total_rub} ₽\n\n"
-                    f"Для оплаты нажмите кнопку ниже:\n\n"
-                    f"ℹ️ <i>После оплаты статус обновится автоматически в течение 2-3 минут</i>",
-                    reply_markup=ikb_payment_button(order_id, float(total_rub))
-                )
-            else:
-                # Fallback на тестовую кнопку если YooKassa недоступна
-                await bot.send_message(
-                    int(customer_id),
-                    f"🎉 <b>Ваш заказ #{order_id} одобрен!</b>\n\n"
-                    f"💰 <b>Сумма к оплате:</b> {total_rub} ₽\n\n"
-                    f"Для подтвержденияawait оплаты нажмите кнопку ниже:",
-                    reply_markup=ikb_payment_test_button(order_id)
-                )
         except Exception as e:
-            log.error(f"Failed to notify customer: {e}")
-        
-        # Завершаем FSM
+            log.error(f"Failed to append order to Sheets: {e}")
+
+        # 5) Сообщение клиенту — кнопка на второго бота
+        pay_url = settings.payment_bot_url or "https://t.me/YourPaymentsBot"
+        await bot.send_message(
+            int(customer_id),
+            (
+                f"🧾 <b>Заказ #{order_id} одобрен</b>\n"
+                f"К оплате: <b>{float(total_rub):.0f} ₽</b>\n\n"
+                "Оплата принимается во втором боте:"
+            ),
+            reply_markup=ikb_open_payment_bot(pay_url, "Открыть бота для оплаты")
+        )
+
         await state.clear()
-        
-        await cq.message.answer(f"✅ Заказ #{order_id} одобрен и опубликован в Google Sheets")
-        await cq.answer()
-        
+        await cq.answer("Расчёт подтверждён")
+
     except Exception as e:
-        log.error(f"Error confirming calculation: {e}")
-        await cq.answer("Ошибка при обработке заказа", show_alert=True)
+        log.error(f"Error confirming calculation: {e}", exc_info=True)
+        await cq.answer("Ошибка при подтверждении", show_alert=True)
         await state.clear()
 
 @router.callback_query(F.data == "CALC:CANCEL", OrderApprovalFSM.ConfirmingCalculation)
